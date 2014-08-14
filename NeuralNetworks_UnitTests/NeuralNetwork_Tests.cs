@@ -8,19 +8,22 @@ using System.Reflection;
 using System.IO;
 using CommonLib;
 using NUnit.Framework;
+using MathNet.Numerics.LinearAlgebra.Double;
+using MathNet.Numerics.Data.Text;
+using MathNet.Numerics.LinearAlgebra;
 
 namespace NeuralNetworkTests
 {
     [TestFixture]
     public class NeuralNetwork_Tests
     {
-        private Matrix X;
-        private Matrix y;
-        private Matrix theta;
+        private Matrix<double> X;
+        private Matrix<double> y;
+        private Matrix<double> theta;
 
-        private Matrix Xm;
-        private Matrix ym;
-        private Matrix bothThetas;
+        private Matrix<double> Xm;
+        private Matrix<double> ym;
+        private Matrix<double> bothThetas;
 
         [TestFixtureSetUp]
         public void TestInitialise()
@@ -30,7 +33,7 @@ namespace NeuralNetworkTests
             int numRows = 20;
 
             #region initialise X - training data
-            X = new Matrix(numRows, 3);
+            X = new DenseMatrix(numRows, 3);
             for (int i = 0; i < numRows; i++)
             {
                 X[i, 0] = 1;
@@ -49,7 +52,7 @@ namespace NeuralNetworkTests
 
             #region initialise y - output data
 
-            y = new Matrix(numRows, 1);
+            y = new DenseMatrix(numRows, 1);
 
             for (int i = 0; i < numRows; i++)
             {
@@ -59,7 +62,7 @@ namespace NeuralNetworkTests
 
             #region initialise theta - parameters to find actually from gradient descent
 
-            theta = new Matrix(3, 1);
+            theta = new DenseMatrix(3, 1);
 
             //[0.25 0.5 -0.5]
             theta[0, 0] = 0.25;
@@ -71,19 +74,19 @@ namespace NeuralNetworkTests
             #region Xm // Xm = reshape(sin(1:32), 16, 2) / 5;
 
             int numRowsXm = 32;
-            Xm = new Matrix(numRowsXm, 1);
+            var XmData = new double[numRowsXm];
             for (int i = 1; i <= numRowsXm; i++)
             {
-                Xm[i - 1, 0] = Math.Sin(i) / 5;
+                XmData[i - 1] = Math.Sin(i) / 5;
             }
-            Xm.Reshape(16, 2);
+            Xm = new DenseMatrix(16, 2, XmData);
 
             #endregion
 
             #region ym // ym = 1 + mod(1:16,4)';
 
             int numRowsym = 16;
-            ym = new Matrix(numRowsym, 1);
+            ym = new DenseMatrix(numRowsym, 1);
             for (int i = 1; i <= numRowsym; i++)
             {
                 ym[i - 1, 0] = i % 4 + 1;
@@ -93,7 +96,7 @@ namespace NeuralNetworkTests
 
             #region // theta1 = sin(reshape(1:2:24, 4, 3));
 
-            var theta1 = new Matrix(4, 3);
+            var theta1 = new DenseMatrix(4, 3);
             int k = 1;
             for (int j = 0; j < 3; j++)
             {
@@ -108,7 +111,7 @@ namespace NeuralNetworkTests
 
             #region // theta2 = cos(reshape(1:2:40, 4, 5));
 
-            var theta2 = new Matrix(4, 5);
+            var theta2 = new DenseMatrix(4, 5);
             int t = 1;
             for (int j = 0; j < 5; j++)
             {
@@ -123,9 +126,11 @@ namespace NeuralNetworkTests
 
             #region //both thetas = theta1 and theta2 - in one matrix representation
 
-            theta1.Reshape(theta1.Rows * theta1.Columns, 1);
-            theta2.Reshape(theta2.Rows * theta2.Columns, 1);
-            bothThetas = Matrix.ConcatMatrices(theta1, theta2, false);
+            var theta1Data = theta1.ToColumnWiseArray();
+            var theta2Data = theta2.ToColumnWiseArray();
+            var bothThetasData = theta1Data.Concat(theta2Data).ToArray();
+            bothThetas = new DenseMatrix(theta1Data.Length + theta2Data.Length, 1, bothThetasData);
+     
 
             #endregion
         }
@@ -138,15 +143,37 @@ namespace NeuralNetworkTests
             return Path.GetDirectoryName(path);
         }
 
+        public bool MatricesEqual(Matrix<double> m1, Matrix<double> m2, double difference = 0.00000000001)
+        {
+            bool result = true;
+
+            for (int i = 0; i < m1.RowCount; i++)
+            {
+                for (int j = 0; j < m1.ColumnCount; j++)
+                {
+
+                    if (Math.Abs(m1[i, j] - m2[i, j]) <= difference)
+                    {
+                        result &= true;
+                    }
+                    else
+                    {
+                        result &= false;
+                    }
+                }
+            }
+            return result;
+        }
+
         [Test]
         public void TestSigmoid()
         {
             var sigmoid = NeuralNetwork.Sigmoid(X);
 
             var path = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\Sigmoid.txt");
-            var matrixToCompare = Matrix.LoadMatrixFromFile(path);
+            var matrixToCompare = (DenseMatrix)DelimitedReader.Read<double>(path);
 
-            Assert.IsTrue(sigmoid.Equals(matrixToCompare));
+            Assert.IsTrue(MatricesEqual(sigmoid, matrixToCompare));
         }
 
         [Test]
@@ -155,16 +182,16 @@ namespace NeuralNetworkTests
             var tupleJAndGrad = NeuralNetwork.CostFunction(theta, X, y);
 
             var pathJ = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\J.txt");
-            var matrixJ = Matrix.LoadMatrixFromFile(pathJ);
+            var matrixJ = (DenseMatrix)DelimitedReader.Read<double>(pathJ);
 
             var pathGrad = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\Grad.txt");
-            var matrixGrad = Matrix.LoadMatrixFromFile(pathGrad);
+            var matrixGrad = (DenseMatrix)DelimitedReader.Read<double>(pathGrad);
 
             Assert.IsTrue(Equalities.DoubleEquals(tupleJAndGrad.Item1, matrixJ[0, 0]));
-            Assert.IsTrue(tupleJAndGrad.Item2.Equals(matrixGrad));
+            Assert.IsTrue(MatricesEqual(tupleJAndGrad.Item2, matrixGrad));
         }
 
-        private Tuple<double, Matrix> Equation(Matrix X)
+        private Tuple<double, Matrix<double>> Equation(Matrix<double> X)
         {
             double x = X[0, 0];
             double y = X[1, 0];
@@ -173,7 +200,7 @@ namespace NeuralNetworkTests
             var dx = 2 * x;
             var dy = 2 * y;
 
-            var df = new Matrix(2, 1);
+            Matrix<double> df = new DenseMatrix(2, 1);
             df[0, 0] = dx;
             df[1, 0] = dy;
 
@@ -183,7 +210,7 @@ namespace NeuralNetworkTests
         [Test]
         public void TestGradientDescent()
         {
-            var theta = new Matrix(2, 1);
+            Matrix<double> theta = new DenseMatrix(2, 1);
             theta[0, 0] = 1;
             theta[1, 0] = 1;
 
@@ -196,7 +223,7 @@ namespace NeuralNetworkTests
             Assert.IsTrue(Equalities.DoubleEquals(resultTheta[0, 0], 0, 0.00000001));
             Assert.IsTrue(Equalities.DoubleEquals(resultTheta[1, 0], 0, 0.00000001));
 
-            var resultCost = result.Item2.GetSingleArrayAsRows().LastOrDefault(elem => elem != 0.0d);
+            var resultCost = result.Item2.ToRowWiseArray().LastOrDefault(elem => elem != 0.0d);
             Assert.IsTrue(Equalities.DoubleEquals(resultCost, 0));
         }
 
@@ -211,15 +238,16 @@ namespace NeuralNetworkTests
                 };
 
             var resultNumericalGradient = NeuralNetwork.ComputeNumericalGradient(backProp, bothThetas);
-            //var pathNumericalGradients = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\NumericalGradients.txt");
-            //var matrixNumericalGradients = Matrix.LoadMatrixFromFile(pathNumericalGradients);
-            //Assert.IsTrue(resultNumericalGradient.Equals(matrixNumericalGradients));
+            var pathNumericalGradients = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\NumericalGradientForBackPropagationWithoutRegularisation.txt");
+            var matrixNumericalGradients = DelimitedReader.Read<double>(pathNumericalGradients);
+            Assert.IsTrue(MatricesEqual(resultNumericalGradient, matrixNumericalGradients));
 
             var resultBackPropagation = NeuralNetwork.BackPropagation(bothThetas, 2, 4, 4, Xm, ym, 0);
-            //var pathGradientForBackPropagation = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagation.txt");
-            //var matrixGradientForBackPropagation = Matrix.LoadMatrixFromFile(pathGradientForBackPropagation);
-            //Assert.IsTrue(Equalities.DoubleEquals(resultBackPropagation.Item1, 3.46051055642594));
-            Assert.IsTrue(resultBackPropagation.Item2.Equals(resultNumericalGradient, 0.000000001));
+            var pathGradientForBackPropagation = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagationWithoutRegularisation.txt");
+            var matrixGradientForBackPropagation = DelimitedReader.Read<double>(pathGradientForBackPropagation);
+            Assert.IsTrue(Equalities.DoubleEquals(resultBackPropagation.Item1, 3.08744915815864));
+            
+            Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, resultNumericalGradient, 0.000000001));
         }
 
         [Test]
@@ -234,22 +262,22 @@ namespace NeuralNetworkTests
 
             var resultNumericalGradient = NeuralNetwork.ComputeNumericalGradient(backProp, bothThetas);
             var pathNumericalGradients = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\NumericalGradients.txt");
-            var matrixNumericalGradients = Matrix.LoadMatrixFromFile(pathNumericalGradients);
-            Assert.IsTrue(resultNumericalGradient.Equals(matrixNumericalGradients));
+            var matrixNumericalGradients = DelimitedReader.Read<double>(pathNumericalGradients);
+            Assert.IsTrue(MatricesEqual(resultNumericalGradient, matrixNumericalGradients));
 
             var resultBackPropagation = NeuralNetwork.BackPropagation(bothThetas, 2, 4, 4, Xm, ym, 1);
             var pathGradientForBackPropagation = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagation.txt");
-            var matrixGradientForBackPropagation = Matrix.LoadMatrixFromFile(pathGradientForBackPropagation);
+            var matrixGradientForBackPropagation = DelimitedReader.Read<double>(pathGradientForBackPropagation);
             Assert.IsTrue(Equalities.DoubleEquals(resultBackPropagation.Item1, 3.46051055642594));
-            Assert.IsTrue(resultBackPropagation.Item2.Equals(matrixGradientForBackPropagation));
+            Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, matrixGradientForBackPropagation));
 
-            Assert.IsTrue(resultBackPropagation.Item2.Equals(resultNumericalGradient, 0.000000001));
+            Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, resultNumericalGradient, 0.000000001));
 
             var resultGradientDescent = NeuralNetwork.GradientDescent(backProp, bothThetas, 1, 3000);
             var pathResultTheta = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\ThetaAfterGradientDescentForBackProp.txt");
-            var matrixResultTheta = Matrix.LoadMatrixFromFile(pathResultTheta);
-            Assert.IsTrue(resultGradientDescent.Item1.Equals(matrixResultTheta));
-            var resultCost = resultGradientDescent.Item2.GetSingleArrayAsRows().LastOrDefault(elem => elem != 0.0d);
+            var matrixResultTheta = DelimitedReader.Read<double>(pathResultTheta);
+            Assert.IsTrue(MatricesEqual(resultGradientDescent.Item1, matrixResultTheta));
+            var resultCost = resultGradientDescent.Item2.ToRowWiseArray().LastOrDefault(elem => elem != 0.0d);
             Assert.IsTrue(Equalities.DoubleEquals(resultCost, 2.24934057847533));
         }
     }

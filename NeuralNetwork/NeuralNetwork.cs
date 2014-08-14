@@ -3,67 +3,116 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using CommonLib;
+using MathNet.Numerics.LinearAlgebra.Double;
+using MathNet.Numerics.LinearAlgebra;
+using System.Diagnostics;
 
 namespace TestNeuralNetwork
 {
+
+    public class ForwardPropagationResult
+    {
+        public Matrix<double> a1;
+        public Matrix<double> z2;
+        public Matrix<double> a2;   
+        public Matrix<double> z3;
+        public Matrix<double> h;
+
+        public ForwardPropagationResult(Matrix<double> a1,  
+            Matrix<double> z2, Matrix<double> a2, Matrix<double> z3, Matrix<double> h)
+        {
+            this.a1 = a1;
+            this.a2 = a2;
+            this.h = h;
+            this.z2 = z2;
+            this.z3 = z3;
+        }
+    }
+
     public static class NeuralNetwork
     {
-        public static Matrix Sigmoid(Matrix Z)
+        private static Matrix<double> DoublePowMatrix(double p, Matrix<double> a)
         {
-            return 1 / ((Math.Exp(1) ^ (Z * (-1))) + 1);
+            var b = new DenseMatrix(a.RowCount, a.ColumnCount);
+
+            for (int i = 0; i < a.RowCount; i++)
+            {
+                for (int j = 0; j < a.ColumnCount; j++)
+                {
+                    b[i, j] = Math.Pow(p, a[i, j]);
+                }
+            }
+
+            return b;
         }
 
-        public static Matrix SigmoidGradient(Matrix Z)
+        public static Matrix<double> Sigmoid(Matrix<double> Z)
         {
-            return Sigmoid(Z).MultiplyElementWise((1 - Sigmoid(Z)));
+            return (1 / (DoublePowMatrix(Math.Exp(1), (Z * (-1))) + 1));
         }
 
-        public static Matrix HypothesisFunction(Matrix X, Matrix theta)
+        public static Matrix<double> SigmoidGradient(Matrix<double> Z)
+        {
+            return Sigmoid(Z).PointwiseMultiply((1 - Sigmoid(Z)));
+        }
+
+        public static Matrix<double> HypothesisFunction(Matrix<double> X, Matrix<double> theta)
         {
             var Z = X * theta;
             return Sigmoid(Z);
         }
 
-        public static Tuple<double, Matrix> CostFunction(Matrix theta, Matrix X, Matrix y, double lambda = 1)
+        public static Tuple<double, Matrix<double>> CostFunction(Matrix<double> theta, Matrix<double> X, Matrix<double> y, double lambda = 1)
         {
             var h = HypothesisFunction(X, theta);
 
-            double m = (double)y.Rows;
+            int m = y.RowCount;
 
-            var y1 = (~y) * Matrix.Log(h);
-
-            var y0 = (~(1 - y)) * Matrix.Log(1 - h);
+            var logH = h.PointwiseLog();
+            var log1_H = (1 - h).PointwiseLog();
+            
+            var y1 = (y.Transpose() * logH);
+            var y0 = ((1 - y).Transpose() * log1_H);
 
             //J = (-1/m) * (sum(y' * log(h) + (1 - y)' * log(1-h))) + (lambda/(2*m)) * sum(theta(2:size(theta)).^2)';
+            var theta0 = theta.SubMatrix(1, theta.RowCount - 1, 0, theta.ColumnCount);
 
-            var theta0 = theta.SubMatrix(1, theta.Rows, false);
-
-            var J = Matrix.Sum(y1 + y0) * (double)(-1 / m) + Matrix.Sum(theta0 ^ 2) * (double)(lambda / (2 * m));
+            var J = (y1 + y0).ColumnSums() * (double)(-1d / m) + ((theta0.PointwisePower(2)).ColumnSums()) * (double)(lambda / (2d * m));
 
             // x_o = X(:,1);
             // x_rest = X(:, 2:end);
 
             // grad(1) = (1/m) * sum((h - y)'*x_o, 1);
-            // grad(2:end) = (1/m) * sum(h - y)'*x_rest, 1)' + (lambda/m) * theta(2:end);
+            // grad(2:end) = (1/m) * sum((h - y)'*x_rest, 1)' + (lambda/m) * theta(2:end);
 
-            var x0 = X.SubMatrix(0, 1);
+            var x0 = X.SubMatrix(0, X.RowCount, 0, 1);
+            var xRest = X.SubMatrix(0, X.RowCount, 1, X.ColumnCount-1);
 
-            var xRest = X.SubMatrix(1, X.Columns);
+            var transposedh_y = (h - y).Transpose();
+            var h_y_x0 = transposedh_y * x0;
+            var h_y_xRest = transposedh_y * xRest;
 
-            var grad1 = (double)(1 / m) * Matrix.Sum((~(h - y)) * x0);
-            var grad2 = (double)(1 / m) * Matrix.Sum((~(h - y)) * xRest) + (double)(lambda / m) * (~theta0);
+            var sum1 = new DenseMatrix(1, h_y_x0.ColumnCount, (h_y_x0.ColumnSums().ToArray()));
+            var sum2 = new DenseMatrix(1, h_y_xRest.ColumnCount, (h_y_xRest.ColumnSums().ToArray()));
 
-            var grad = Matrix.ConcatMatrices(grad1, grad2);
+            var grad1 = ((double)(1d / m)) * (sum1);
+            var grad2 = ((double)(1d / m)) * (sum2) + (double)(lambda / m) * theta0.Transpose();
 
-            var result = Tuple.Create(J[0, 0], grad);
+            var grad = grad1.Append(grad2);
+
+            var result = Tuple.Create(J[0], grad);
 
             return result;
         }
 
         // Gradient Descent
-        public static Tuple<Matrix, Matrix> GradientDescent(CostFunctionWithThetaParameter func, Matrix theta, double alpha, int numberIterations)
+        public static Tuple<Matrix<double>, Matrix<double>> GradientDescent(CostFunctionWithThetaParameter func,
+            Matrix<double> theta, double alpha, int numberIterations)
         {
-            var JHistory = new Matrix(numberIterations, 1);
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+            
+            Matrix<double> JHistory = new DenseMatrix(numberIterations, 1);
             var alphaHistory = new double[numberIterations];
             for (int i = 0; i < numberIterations; i++)
             {
@@ -110,27 +159,37 @@ namespace TestNeuralNetwork
                 }   
             }
 
-            var m = new Matrix(numberIterations, 1, alphaHistory);
+            var m = new DenseMatrix(numberIterations, 1, alphaHistory);
+            
+            stopWatch.Stop();
+            // Get the elapsed time as a TimeSpan value.
+            TimeSpan ts = stopWatch.Elapsed;
+
+            // Format and display the TimeSpan value. 
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
+            Console.WriteLine("RunTime " + elapsedTime);
+
             return Tuple.Create(theta, JHistory);
         }
 
-        public delegate Tuple<double, Matrix> CostFunctionWithThetaParameter(Matrix m);
+        public delegate Tuple<double, Matrix<double>> CostFunctionWithThetaParameter(Matrix<double> m);
 
-        public static Matrix ComputeNumericalGradient(CostFunctionWithThetaParameter J, Matrix theta)
+        public static Matrix<double> ComputeNumericalGradient(CostFunctionWithThetaParameter J, Matrix<double> theta)
         {
             double epsilon = 0.0001;
 
-            var numericalGradient = new Matrix(theta.Rows, 1);
-            var perturbations = new Matrix(theta.Rows, 1); // смущения ;))
+            Matrix<double> numericalGradient = new DenseMatrix(theta.RowCount, 1);
+            var perturbations = new DenseMatrix(theta.RowCount, 1); // смущения ;))
 
-            for (int p = 0; p < theta.Rows; p++)
+            for (int p = 0; p < theta.RowCount; p++)
             {
                 perturbations[p, 0] = epsilon;
 
                 double loss1 = J(theta + perturbations).Item1;
                 double loss2 = J(theta - perturbations).Item1;
 
-                numericalGradient[p, 0] = ((loss1 - loss2) / (double)(2 * epsilon));
+                numericalGradient[p, 0] = ((loss1 - loss2) / (double)(2d * epsilon));
 
                 perturbations[p, 0] = 0;
             }
@@ -138,35 +197,57 @@ namespace TestNeuralNetwork
             return numericalGradient;
         }
 
-        // Forward Propagation
-        public static List<Matrix> ForwardPropagation(Matrix X, IEnumerable<Matrix> thetas)
+        public static List<Matrix<double>> UnpackThetas(Matrix<double> theta,
+            int inputLayerSize, int hiddenLayerSize, int numberLabels)
         {
-            var activationFunctions = new List<Matrix>();
+            var theta1 = MatriceSubRowMatrixAndReshape(theta, hiddenLayerSize, inputLayerSize + 1,
+                   0, hiddenLayerSize * (inputLayerSize + 1));
+            var theta2 = MatriceSubRowMatrixAndReshape(theta, numberLabels, hiddenLayerSize + 1,
+                hiddenLayerSize * (inputLayerSize + 1), theta.RowCount - hiddenLayerSize * (inputLayerSize + 1));
 
-            var ai = X;
-            for (int i = 0; i < thetas.Count(); i++)
-            {
-                var thetai = thetas.ElementAt(i);
-
-                var onesT = new Matrix(1, 1, thetai.Columns);
-                thetai = Matrix.ConcatMatrices(onesT, thetai, false);
-
-                var ones = new Matrix(1, ai.Rows, 1);
-                ai = Matrix.ConcatMatrices(ones, ai);
-
-                ai = HypothesisFunction(ai, thetai);
-
-                activationFunctions.Add(ai);
-            }
-
-            return activationFunctions;
+            return new List<Matrix<double>>() { theta1, theta2 };
         }
 
-        public static Matrix GetOutputVectors(Matrix yClasses, int numberLabels)
+        // Forward Propagation
+        public static ForwardPropagationResult ForwardPropagation(Matrix<double> X, 
+            IEnumerable<Matrix<double>> thetas, int inputLayerSize, int hiddenLayerSize, int numberLabels)
         {
-            int m = yClasses.Rows;
+            var theta1 = thetas.ElementAt(0);
+            var theta2 = thetas.ElementAt(1);
+
+            int m = X.RowCount;
+           
+            /// forward propagation   
+            var a1 = X;
+            var onesa1 = GetMatrixColumnOfOnes(a1.RowCount); 
+            var a11 = onesa1.Append(a1);
+
+            var z2 = (a11 * theta1.Transpose());
+            var a2 = Sigmoid(z2);
+            var onesa2 = GetMatrixColumnOfOnes(a2.RowCount); 
+            var a12 = onesa2.Append(a2);
+
+            var z3 = (a12 * theta2.Transpose());
+            var a3 = Sigmoid(z3);
+
+            var h = a3;
+
+            return new ForwardPropagationResult(a11, z2, a12, z3, h);
+        }
+
+        public static void Populate<T>(this T[] arr, T value)
+        {
+            for (int i = 0; i < arr.Length; i++)
+            {
+                arr[i] = value;
+            }
+        }
+
+        public static Matrix<double> GetOutputVectors(Matrix<double> yClasses, int numberLabels)
+        {
+            int m = yClasses.RowCount;
             
-            var y = new Matrix(m, numberLabels);
+            var y = new DenseMatrix(m, numberLabels);
 
             for(int i=0; i<m; i++)
             {
@@ -176,70 +257,90 @@ namespace TestNeuralNetwork
             return y;
         }
 
-        public static Tuple<double, Matrix> BackPropagation(Matrix theta, int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix X, Matrix y, double lambda)
+        public static Tuple<double, Matrix<double>> BackPropagation(Matrix<double> theta,
+            int inputLayerSize, int hiddenLayerSize, int numberLabels,
+            Matrix<double> X, Matrix<double> y, double lambda)
         {
-            int m = X.Rows;
+            int m = X.RowCount;
+            var thetas = UnpackThetas(theta, inputLayerSize, hiddenLayerSize, numberLabels);
+            var theta1 = thetas.ElementAt(0);
+            var theta2 = thetas.ElementAt(1);
 
-            var theta1 = theta.SubMatrix(0, hiddenLayerSize * (inputLayerSize + 1), false);
-            theta1.Reshape(hiddenLayerSize, inputLayerSize + 1);
+            /// feed forward
+            var feedForwardResult = ForwardPropagation(X, thetas, inputLayerSize, hiddenLayerSize, numberLabels);
 
-            var theta2 = theta.SubMatrix(hiddenLayerSize * (inputLayerSize + 1), theta.Rows, false);
-            theta2.Reshape(numberLabels, hiddenLayerSize + 1);
-         
-            /// forward propagation   
-            var a1 = X;
-            var onesa1 = new Matrix(1, a1.Rows, 1);
-            a1 = Matrix.ConcatMatrices(onesa1, a1);
+            var newY = GetOutputVectors(y, feedForwardResult.h.ColumnCount);
 
-            var z2 = a1 * ~theta1;
-            var a2 = Sigmoid(z2);
-
-            var onesa2 = new Matrix(1, a2.Rows, 1);
-            a2 = Matrix.ConcatMatrices(onesa2, a2);
-
-            var z3 = a2 * ~theta2;
-            var a3 = Sigmoid(z3);
-
-            var h = a3;
-            /// end of forward propagation
-
-            var newY = GetOutputVectors(y, h.Columns);
-
-            double J = BackPropagationCostFunction(h, newY,
+            /// back propagation
+            double J = BackPropagationCostFunction(feedForwardResult.h, newY,
                 inputLayerSize, hiddenLayerSize, numberLabels,
                 theta1, theta2, lambda, m);
-         
-            /// back propagation
-            var delta3 = h - newY;
-            var r2 = ~theta2.SubMatrix(1, theta2.Columns) * ~delta3;
 
-            var delta2 = (~r2).MultiplyElementWise(SigmoidGradient(z2));
-
-            var theta1_grad = ~delta2 * a1;
-            var theta2_grad = ~delta3 * a2;
- 
-            var t1 = (double) lambda * theta1 /  m;
-            t1.Zero(0, false);
-
-            var t2 = (double) lambda * theta2 / m;
-            t2.Zero(0, false);
-
-            theta1_grad = theta1_grad / m + t1;
-            theta2_grad = theta2_grad / m + t2;
-            
-            var theta1_grad_arr = theta1_grad.GetSingleArrayAsColumns();
-            var theta2_grad_arr = theta2_grad.GetSingleArrayAsColumns();
-
-            var grad = theta1_grad_arr.Concat(theta2_grad_arr).ToArray();
-            var gradMatrix = new Matrix(grad.Count(), 1, grad);
-
-            return Tuple.Create(J, gradMatrix);
+            var gradient = GetBackPropagationGradient(feedForwardResult, newY,
+                inputLayerSize, hiddenLayerSize, numberLabels,
+                theta1, theta2, lambda, m);
+           
+            return Tuple.Create(J, gradient);
         }
 
-        private static double BackPropagationCostFunction(Matrix h, Matrix y,
-            int inputLayerSize, int hiddenLayerSize, int numberLabels, 
-            Matrix theta1, Matrix theta2, double lambda, int numberOfTestSamples)
+        private static Matrix<double> GetBackPropagationGradient(ForwardPropagationResult feedForward,
+            Matrix<double> newY, int inputLayerSize, int hiddenLayerSize, int numberLabels,
+            Matrix<double> theta1, Matrix<double> theta2, double lambda, int m)
+        {
+            var delta3 = feedForward.h - newY;
+            var r2 = (theta2.SubMatrix(0, theta2.RowCount, 1, theta2.ColumnCount - 1)).Transpose() * delta3.Transpose();
+
+            var delta2 = r2.Transpose().PointwiseMultiply(SigmoidGradient(feedForward.z2));
+
+            var theta1_grad = delta2.Transpose() * feedForward.a1;
+            var theta2_grad = delta3.Transpose() * feedForward.a2;
+
+            var t1 = (lambda * theta1) / m;
+            var zerosFort1 = GetArrayOfNumber(0, t1.RowCount);
+            t1.SetColumn(0, zerosFort1);
+
+            var t2 = (lambda * theta2) / m;
+            var zerosFort2 = GetArrayOfNumber(0, t2.RowCount);
+            t2.SetColumn(0, zerosFort2);
+
+            theta1_grad = (theta1_grad / m) + t1;
+            theta2_grad = (theta2_grad / m) + t2;
+
+            var theta1_grad_arr = theta1_grad.ToColumnWiseArray();
+            var theta2_grad_arr = theta2_grad.ToColumnWiseArray();
+
+            var grad = theta1_grad_arr.Concat(theta2_grad_arr).ToArray();
+            Matrix<double> gradMatrix = new DenseMatrix(grad.Count(), 1, grad);
+
+            return gradMatrix;
+        }
+
+        private static double[] GetArrayOfNumber(double number, int size)
+        {
+            var numbers = new double[size];
+            numbers.Populate(number);
+            return numbers;
+        }
+
+        private static Matrix<double> GetMatrixColumnOfOnes(int rowCount)
+        {
+            var onesMatrix = new DenseMatrix(rowCount, 1, GetArrayOfNumber(1, rowCount));
+
+            return onesMatrix;
+        }
+
+        private static Matrix<double> MatriceSubRowMatrixAndReshape(Matrix<double> matrix, int rowCount, int columnCount, int from, int to)
+        {
+            var subMatrix = matrix.SubMatrix(from, to, 0, matrix.ColumnCount);
+            var dataMatrix = subMatrix.ToRowWiseArray();
+            var newMatrix = new DenseMatrix(rowCount, columnCount, dataMatrix);
+
+            return newMatrix;
+        }
+
+        private static double BackPropagationCostFunction(Matrix<double> h, Matrix<double> y,
+            int inputLayerSize, int hiddenLayerSize, int numberLabels,
+            Matrix<double> theta1, Matrix<double> theta2, double lambda, int numberOfTestSamples)
         {
             int m = numberOfTestSamples;
          
@@ -264,7 +365,7 @@ namespace TestNeuralNetwork
         }
 
         private static double GetRegularisationTerm(int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix theta1, Matrix theta2, double lambda, double numberTestSamples)
+            Matrix<double> theta1, Matrix<double> theta2, double lambda, double numberTestSamples)
         {
             var m = numberTestSamples;
 
