@@ -23,12 +23,13 @@ namespace NeuralNetworkTests
 
         private Matrix<double> Xm;
         private Matrix<double> ym;
-        private Matrix<double> bothThetas;
+        private Matrix<double> theta1NN;
+        private Matrix<double> theta2NN;
 
         [TestFixtureSetUp]
         public void TestInitialise()
         {
-            CultureSettings.SetNumberDecimalSeparatorToDot();
+            Utils.SetNumberDecimalSeparatorToDotInCultureSettings();
 
             int numRows = 20;
 
@@ -128,19 +129,10 @@ namespace NeuralNetworkTests
 
             var theta1Data = theta1.ToColumnWiseArray();
             var theta2Data = theta2.ToColumnWiseArray();
-            var bothThetasData = theta1Data.Concat(theta2Data).ToArray();
-            bothThetas = new DenseMatrix(theta1Data.Length + theta2Data.Length, 1, bothThetasData);
-     
+            theta1NN = new DenseMatrix(4, 3, theta1Data);
+            theta2NN = new DenseMatrix(4, 5, theta2Data);
 
             #endregion
-        }
-
-        private string GetAssemblyPath()
-        {
-            string codeBase = Assembly.GetExecutingAssembly().CodeBase;
-            UriBuilder uri = new UriBuilder(codeBase);
-            string path = Uri.UnescapeDataString(uri.Path);
-            return Path.GetDirectoryName(path);
         }
 
         public bool MatricesEqual(Matrix<double> m1, Matrix<double> m2, double difference = 0.00000000001)
@@ -170,7 +162,7 @@ namespace NeuralNetworkTests
         {
             var sigmoid = NeuralNetwork.Sigmoid(X);
 
-            var path = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\Sigmoid.txt");
+            var path = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\Sigmoid.txt");
             var matrixToCompare = (DenseMatrix)DelimitedReader.Read<double>(path);
 
             Assert.IsTrue(MatricesEqual(sigmoid, matrixToCompare));
@@ -181,10 +173,10 @@ namespace NeuralNetworkTests
         {
             var tupleJAndGrad = NeuralNetwork.CostFunction(theta, X, y);
 
-            var pathJ = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\J.txt");
+            var pathJ = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\J.txt");
             var matrixJ = (DenseMatrix)DelimitedReader.Read<double>(pathJ);
 
-            var pathGrad = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\Grad.txt");
+            var pathGrad = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\Grad.txt");
             var matrixGrad = (DenseMatrix)DelimitedReader.Read<double>(pathGrad);
 
             Assert.IsTrue(Equalities.DoubleEquals(tupleJAndGrad.Item1, matrixJ[0, 0]));
@@ -228,25 +220,58 @@ namespace NeuralNetworkTests
         }
 
         [Test]
+        public void TestForwardPropagation()
+        {
+
+            var resultFeedForward = NeuralNetwork.ForwardPropagation(Xm, new List<Matrix<double>>() { theta1NN, theta2NN });
+
+            var h = resultFeedForward.OutputActivation;
+            var a1 = resultFeedForward.NodesActivations.ElementAt(0);
+            var a2 = resultFeedForward.NodesActivations.ElementAt(1);
+            var z2 = resultFeedForward.NodesOutputs.ElementAt(0);
+            var z3 = resultFeedForward.NodesOutputs.ElementAt(1);
+
+            var pathH = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\FeedForward_h.txt");
+            var patha1 = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\FeedForward_a1.txt");
+            var patha2 = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\FeedForward_a2.txt");
+            var pathz2 = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\FeedForward_z2.txt");
+            var pathz3 = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\FeedForward_z3.txt");
+
+            var wantedH = DelimitedReader.Read<double>(pathH);
+            var wanteda1 = DelimitedReader.Read<double>(patha1);
+            var wanteda2 = DelimitedReader.Read<double>(patha2);
+            var wantedz2 = DelimitedReader.Read<double>(pathz2);
+            var wantedz3 = DelimitedReader.Read<double>(pathz3);
+
+            Assert.IsTrue(MatricesEqual(h, wantedH));
+            Assert.IsTrue(MatricesEqual(a1, wanteda1));
+            Assert.IsTrue(MatricesEqual(a2, wanteda2));
+            Assert.IsTrue(MatricesEqual(z2, wantedz2));
+            Assert.IsTrue(MatricesEqual(z3, wantedz3));  
+
+        }
+
+        [Test]
         public void TestBackPropagationWithoutRegularisaion()
         {
             NeuralNetwork.CostFunctionWithThetaParameter backProp =
                 t =>
                 {
-                    var backPropagationResult = NeuralNetwork.BackPropagation(t, 2, 4, 4, Xm, ym, 0);
+                    var backPropagationResult = NeuralNetwork.BackPropagation(Xm, ym, t, new List<int>() { 4 }, 4, 0);
                     return backPropagationResult;
                 };
 
+            var bothThetas = NeuralNetwork.PackThetas(new List<Matrix<double>>() { theta1NN, theta2NN });
             var resultNumericalGradient = NeuralNetwork.ComputeNumericalGradient(backProp, bothThetas);
-            var pathNumericalGradients = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\NumericalGradientForBackPropagationWithoutRegularisation.txt");
+            var pathNumericalGradients = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\NumericalGradientForBackPropagationWithoutRegularisation.txt");
             var matrixNumericalGradients = DelimitedReader.Read<double>(pathNumericalGradients);
             Assert.IsTrue(MatricesEqual(resultNumericalGradient, matrixNumericalGradients));
 
-            var resultBackPropagation = NeuralNetwork.BackPropagation(bothThetas, 2, 4, 4, Xm, ym, 0);
-            var pathGradientForBackPropagation = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagationWithoutRegularisation.txt");
+            var resultBackPropagation = NeuralNetwork.BackPropagation(Xm, ym, bothThetas, new List<int>() { 4 }, 4, 0);
+            var pathGradientForBackPropagation = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagationWithoutRegularisation.txt");
             var matrixGradientForBackPropagation = DelimitedReader.Read<double>(pathGradientForBackPropagation);
             Assert.IsTrue(Equalities.DoubleEquals(resultBackPropagation.Item1, 3.08744915815864));
-            
+            Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, matrixGradientForBackPropagation));  
             Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, resultNumericalGradient, 0.000000001));
         }
 
@@ -256,17 +281,18 @@ namespace NeuralNetworkTests
             NeuralNetwork.CostFunctionWithThetaParameter backProp =
                 t =>
                 {
-                    var backPropagationResult = NeuralNetwork.BackPropagation(t, 2, 4, 4, Xm, ym, 1);
+                    var backPropagationResult = NeuralNetwork.BackPropagation(Xm, ym, t, new List<int>() { 4 }, 4, 1);
                     return backPropagationResult;
                 };
 
+            var bothThetas = NeuralNetwork.PackThetas(new List<Matrix<double>>() { theta1NN, theta2NN });
             var resultNumericalGradient = NeuralNetwork.ComputeNumericalGradient(backProp, bothThetas);
-            var pathNumericalGradients = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\NumericalGradients.txt");
+            var pathNumericalGradients = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\NumericalGradients.txt");
             var matrixNumericalGradients = DelimitedReader.Read<double>(pathNumericalGradients);
             Assert.IsTrue(MatricesEqual(resultNumericalGradient, matrixNumericalGradients));
 
-            var resultBackPropagation = NeuralNetwork.BackPropagation(bothThetas, 2, 4, 4, Xm, ym, 1);
-            var pathGradientForBackPropagation = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagation.txt");
+            var resultBackPropagation = NeuralNetwork.BackPropagation(Xm, ym, bothThetas, new List<int>() { 4 }, 4, 1);
+            var pathGradientForBackPropagation = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\GradientForBackPropagation.txt");
             var matrixGradientForBackPropagation = DelimitedReader.Read<double>(pathGradientForBackPropagation);
             Assert.IsTrue(Equalities.DoubleEquals(resultBackPropagation.Item1, 3.46051055642594));
             Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, matrixGradientForBackPropagation));
@@ -274,11 +300,11 @@ namespace NeuralNetworkTests
             Assert.IsTrue(MatricesEqual(resultBackPropagation.Item2, resultNumericalGradient, 0.000000001));
 
             var resultGradientDescent = NeuralNetwork.GradientDescent(backProp, bothThetas, 1, 3000);
-            var pathResultTheta = Path.Combine(GetAssemblyPath(), "..\\..\\TestData\\ThetaAfterGradientDescentForBackProp.txt");
+            var pathResultTheta = Path.Combine(Utils.GetAssemblyPath(), "..\\..\\TestData\\ThetaAfterGradientDescentForBackProp.txt");
             var matrixResultTheta = DelimitedReader.Read<double>(pathResultTheta);
             Assert.IsTrue(MatricesEqual(resultGradientDescent.Item1, matrixResultTheta));
             var resultCost = resultGradientDescent.Item2.ToRowWiseArray().LastOrDefault(elem => elem != 0.0d);
-            Assert.IsTrue(Equalities.DoubleEquals(resultCost, 2.24934057847533));
+            Assert.IsTrue(Equalities.DoubleEquals(resultCost, 2.2493405784756875));
         }
     }
 }

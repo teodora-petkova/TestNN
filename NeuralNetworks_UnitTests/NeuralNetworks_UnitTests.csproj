@@ -74,6 +74,11 @@
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
+    <Content Include="TestData\FeedForward_a1.txt" />
+    <Content Include="TestData\FeedForward_a2.txt" />
+    <Content Include="TestData\FeedForward_h.txt" />
+    <Content Include="TestData\FeedForward_z2.txt" />
+    <Content Include="TestData\FeedForward_z3.txt" />
     <Content Include="TestData\grad.txt" />
     <Content Include="TestData\GradientForBackPropagation.txt" />
     <Content Include="TestData\GradientForBackPropagationWithoutRegularisation.txt" />

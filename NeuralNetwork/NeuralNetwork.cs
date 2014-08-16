@@ -12,25 +12,80 @@ namespace TestNeuralNetwork
 
     public class ForwardPropagationResult
     {
-        public Matrix<double> a1;
-        public Matrix<double> z2;
-        public Matrix<double> a2;   
-        public Matrix<double> z3;
-        public Matrix<double> h;
-
-        public ForwardPropagationResult(Matrix<double> a1,  
-            Matrix<double> z2, Matrix<double> a2, Matrix<double> z3, Matrix<double> h)
+        public IEnumerable<Matrix<double>> NodesActivations = new List<Matrix<double>>();
+        public IEnumerable<Matrix<double>> NodesOutputs = new List<Matrix<double>>();
+        public Matrix<double> OutputActivation;
+        public ForwardPropagationResult(Matrix<double> h,
+            IEnumerable<Matrix<double>> a,
+            IEnumerable<Matrix<double>> z)
         {
-            this.a1 = a1;
-            this.a2 = a2;
-            this.h = h;
-            this.z2 = z2;
-            this.z3 = z3;
+            this.OutputActivation = h;
+            this.NodesActivations = a;
+            this.NodesOutputs = z;
         }
     }
 
     public static class NeuralNetwork
     {
+        private static Random random = new Random();
+
+        private static double GetRandom(double min, double max, double epsilon = 0.12)
+        {
+            // initialise weights randomly in order to break the symmetry while
+            // training the neural network
+            return random.NextDouble() * 2 * epsilon - epsilon;
+        }
+
+        public static IEnumerable<Matrix<double>> RandomInitialiseWeights(int inputLayerSize, int outputLayerSize, 
+            IEnumerable<int> hiddenLayersSizes)
+        {
+            var initialThetas = new List<Matrix<double>>();
+
+            int previousLayerSize = inputLayerSize+1;
+            int nextLayerSize = -1;
+            Matrix<double> theta = null;
+
+            // if there are hidden layers
+            if(hiddenLayersSizes.Count() > 0)
+            {
+                nextLayerSize = hiddenLayersSizes.ElementAt(0);
+                for (int i = 0; i < hiddenLayersSizes.Count(); i++)
+                {
+                    theta = GetNextTheta(nextLayerSize, previousLayerSize);
+                    initialThetas.Add(theta);
+
+                    previousLayerSize = hiddenLayersSizes.ElementAt(i) + 1;
+                    if (i + 1 < hiddenLayersSizes.Count())
+                    {
+                        nextLayerSize = hiddenLayersSizes.ElementAt(i + 1);
+                    }
+                }
+            }
+
+            nextLayerSize = outputLayerSize;
+            theta = GetNextTheta(nextLayerSize, previousLayerSize);
+            initialThetas.Add(theta);
+
+
+            return initialThetas;
+        }
+
+        private static Matrix<double> GetNextTheta(int nextLayerSize, int previousLayerSize)
+        {
+            double epsilon = Math.Sqrt(6) / Math.Sqrt(previousLayerSize + nextLayerSize);
+
+            var sizeData = previousLayerSize * nextLayerSize;
+            var data = new double[sizeData];
+            for (int k = 0; k < sizeData; k++)
+            {
+                data[k] = GetRandom(previousLayerSize, nextLayerSize, epsilon);
+            }
+
+            var theta = new DenseMatrix(nextLayerSize, previousLayerSize, data);
+
+            return theta;
+        }
+
         private static Matrix<double> DoublePowMatrix(double p, Matrix<double> a)
         {
             var b = new DenseMatrix(a.RowCount, a.ColumnCount);
@@ -105,7 +160,6 @@ namespace TestNeuralNetwork
             return result;
         }
 
-        // Gradient Descent
         public static Tuple<Matrix<double>, Matrix<double>> GradientDescent(CostFunctionWithThetaParameter func,
             Matrix<double> theta, double alpha, int numberIterations)
         {
@@ -113,7 +167,6 @@ namespace TestNeuralNetwork
             stopWatch.Start();
             
             Matrix<double> JHistory = new DenseMatrix(numberIterations, 1);
-            var alphaHistory = new double[numberIterations];
             for (int i = 0; i < numberIterations; i++)
             {
                 var res = func(theta);
@@ -122,45 +175,30 @@ namespace TestNeuralNetwork
                 var grad = res.Item2;
                 JHistory[i, 0] = h;
 
-                //double[] temp = new double[theta.Rows];
-                //for (int j = 0; j < theta.Rows; j++)
-                //{
-                //    temp[j] = theta[j, 0] - (grad[j, 0] * alpha);
-                //}
-
-                //theta = new Matrix(theta.Rows, 1);
-                //for (int j = 0; j < theta.Rows; j++)
-                //{
-                //    theta[j, 0] = temp[j];
-                //}
-
-                theta = theta - grad * alpha;
-
+                
                 // "bold driver" - if we decrease the cost function, increase the learning rate by 5% but
                 // in case when we increase the cost function, decrease the learning rate by 50%
                 if (i > 0)
                 {
                     if (JHistory[i, 0] < JHistory[i - 1, 0])
                     {
-                        alpha += 0.05 * alpha;
+                        alpha += (double)0.05 * alpha;
                     }
                     else
                     {
-                        alpha -= 0.5 * alpha;
+                        alpha -= (double)0.5 * alpha;
                     }
                 }
 
-                alphaHistory[i] = alpha;
+                theta = theta - grad * alpha;
 
                 if (i > 0 && JHistory[i, 0] < JHistory[i - 1, 0] &&
                     Equalities.DoubleEquals(JHistory[i, 0], JHistory[i - 1, 0]))
                 {
                     break;
-                }   
+                }  
             }
-
-            var m = new DenseMatrix(numberIterations, 1, alphaHistory);
-            
+  
             stopWatch.Stop();
             // Get the elapsed time as a TimeSpan value.
             TimeSpan ts = stopWatch.Elapsed;
@@ -197,122 +235,185 @@ namespace TestNeuralNetwork
             return numericalGradient;
         }
 
-        public static List<Matrix<double>> UnpackThetas(Matrix<double> theta,
-            int inputLayerSize, int hiddenLayerSize, int numberLabels)
+        public static Matrix<double> PackThetas(IEnumerable<Matrix<double>> thetas)
         {
-            var theta1 = MatriceSubRowMatrixAndReshape(theta, hiddenLayerSize, inputLayerSize + 1,
-                   0, hiddenLayerSize * (inputLayerSize + 1));
-            var theta2 = MatriceSubRowMatrixAndReshape(theta, numberLabels, hiddenLayerSize + 1,
-                hiddenLayerSize * (inputLayerSize + 1), theta.RowCount - hiddenLayerSize * (inputLayerSize + 1));
+            var allThetas = Enumerable.Empty<double>();
 
-            return new List<Matrix<double>>() { theta1, theta2 };
+            foreach (var theta in thetas)
+            {
+                var data = theta.ToColumnWiseArray();
+                allThetas = allThetas.Concat(data);
+            }
+            var resultTheta = new DenseMatrix(allThetas.Count(), 1, allThetas.ToArray());
+
+            return resultTheta;
         }
 
-        // Forward Propagation
+        public static IEnumerable<Matrix<double>> UnpackThetas(Matrix<double> theta,
+            int inputLayerSize, IEnumerable<int> hiddenLayersSizes, int outputLayerSize)
+        {
+            var thetas = new List<Matrix<double>>();
+
+            Matrix<double> currentTheta = null;
+            int previousLayerSize = inputLayerSize + 1;
+            int nextLayerSize = -1;
+            int startIndex = 0;
+            int size = -1;
+
+            if (hiddenLayersSizes.Count() > 0)
+            {
+                nextLayerSize = hiddenLayersSizes.ElementAt(0);
+                size = nextLayerSize * previousLayerSize;
+
+                for (int i = 0; i < hiddenLayersSizes.Count(); i++)
+                {
+                    currentTheta = MatriceSubRowMatrixAndReshape(theta,
+                        nextLayerSize, previousLayerSize,
+                        startIndex, nextLayerSize * previousLayerSize);
+                    thetas.Add(currentTheta);
+
+                    previousLayerSize = hiddenLayersSizes.ElementAt(i) + 1;
+                    startIndex += size;
+
+                    if (i + 1 < hiddenLayersSizes.Count())
+                    {
+                        nextLayerSize = hiddenLayersSizes.ElementAt(i + 1);
+                        size = nextLayerSize * previousLayerSize;
+                    }
+
+                }
+            }
+
+            nextLayerSize = outputLayerSize;
+            size = nextLayerSize * previousLayerSize;
+
+            currentTheta = MatriceSubRowMatrixAndReshape(theta,
+                        nextLayerSize, previousLayerSize,
+                        startIndex, nextLayerSize * previousLayerSize);
+            thetas.Add(currentTheta);
+
+            return thetas;
+        }
+
         public static ForwardPropagationResult ForwardPropagation(Matrix<double> X, 
-            IEnumerable<Matrix<double>> thetas, int inputLayerSize, int hiddenLayerSize, int numberLabels)
+            IEnumerable<Matrix<double>> thetas)
         {
-            var theta1 = thetas.ElementAt(0);
-            var theta2 = thetas.ElementAt(1);
+            var a = new List<Matrix<double>>();
+            var z = new List<Matrix<double>>();
 
-            int m = X.RowCount;
-           
-            /// forward propagation   
-            var a1 = X;
-            var onesa1 = GetMatrixColumnOfOnes(a1.RowCount); 
-            var a11 = onesa1.Append(a1);
-
-            var z2 = (a11 * theta1.Transpose());
-            var a2 = Sigmoid(z2);
-            var onesa2 = GetMatrixColumnOfOnes(a2.RowCount); 
-            var a12 = onesa2.Append(a2);
-
-            var z3 = (a12 * theta2.Transpose());
-            var a3 = Sigmoid(z3);
-
-            var h = a3;
-
-            return new ForwardPropagationResult(a11, z2, a12, z3, h);
-        }
-
-        public static void Populate<T>(this T[] arr, T value)
-        {
-            for (int i = 0; i < arr.Length; i++)
+            var ai = X;
+            foreach (var theta in thetas)
             {
-                arr[i] = value;
+                var onesai = GetMatrixColumnOfOnes(ai.RowCount);
+                
+                var a1i = onesai.Append(ai);
+                a.Add(a1i);
+
+                var zi = (a1i * theta.Transpose());
+                z.Add(zi);
+                
+                ai = Sigmoid(zi);
             }
+
+            var h = ai; //the output of NN
+
+            return new ForwardPropagationResult(h, a, z);
         }
 
-        public static Matrix<double> GetOutputVectors(Matrix<double> yClasses, int numberLabels)
+        public static Tuple<double, Matrix<double>> BackPropagation(Matrix<double> X,
+            Matrix<double> y, Matrix<double> theta,
+            IEnumerable<int> hiddenLayersSizes, int outputLayerSize, double lambda)
         {
-            int m = yClasses.RowCount;
+            int inputLayerSize = X.ColumnCount;
+            int numberOfTestSamples = X.RowCount;
             
-            var y = new DenseMatrix(m, numberLabels);
-
-            for(int i=0; i<m; i++)
-            {
-                y[i, (int)yClasses[i, 0]-1] = 1;
-            }
-
-            return y;
-        }
-
-        public static Tuple<double, Matrix<double>> BackPropagation(Matrix<double> theta,
-            int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix<double> X, Matrix<double> y, double lambda)
-        {
-            int m = X.RowCount;
-            var thetas = UnpackThetas(theta, inputLayerSize, hiddenLayerSize, numberLabels);
-            var theta1 = thetas.ElementAt(0);
-            var theta2 = thetas.ElementAt(1);
-
+            var thetas = UnpackThetas(theta, inputLayerSize, 
+                hiddenLayersSizes, outputLayerSize);
+          
             /// feed forward
-            var feedForwardResult = ForwardPropagation(X, thetas, inputLayerSize, hiddenLayerSize, numberLabels);
+            var feedForwardResult = ForwardPropagation(X, thetas);
 
-            var newY = GetOutputVectors(y, feedForwardResult.h.ColumnCount);
+            var h = feedForwardResult.OutputActivation;
+            var newY = GetOutputVectors(y, h.ColumnCount);
 
             /// back propagation
-            double J = BackPropagationCostFunction(feedForwardResult.h, newY,
-                inputLayerSize, hiddenLayerSize, numberLabels,
-                theta1, theta2, lambda, m);
+            double J = BackPropagationCostFunction(h, newY,
+                inputLayerSize, hiddenLayersSizes, outputLayerSize,
+                thetas, lambda, numberOfTestSamples);
 
             var gradient = GetBackPropagationGradient(feedForwardResult, newY,
-                inputLayerSize, hiddenLayerSize, numberLabels,
-                theta1, theta2, lambda, m);
+                thetas, lambda, numberOfTestSamples);
            
             return Tuple.Create(J, gradient);
         }
 
+        /// <summary>
+        ///  
+        /// Back Propagation Gradient for a NN with just one hidden layer
+        /// (algorithm for the other hidden layers is the same as for Theta1Gradient)
+        /// 
+        ///   // back propagate from the last layer to last hidden layer
+        ///     smalldelta3 = (h' - newY)';
+        ///     t2 = lambda * Theta2/m;
+        ///     t2(:,1) = 0;
+        ///     Theta2Gradient = (smalldelta3' * a2) / m  + t2;
+        ///
+        ///   // back propagate from the last hidden layer to the previous layer (and so on)
+        ///     smalldelta2 = (smalldelta3 * Theta2(:,2:end)) .* sigmoidGradient(z2);
+        ///     t1 = lambda * Theta1/m;
+        ///     t1(:,1) = 0;
+        ///     Theta1Gradient = (smalldelta2' * a1) / m  + t1;
+        ///
+        /// </summary>
         private static Matrix<double> GetBackPropagationGradient(ForwardPropagationResult feedForward,
-            Matrix<double> newY, int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix<double> theta1, Matrix<double> theta2, double lambda, int m)
+            Matrix<double> newY, IEnumerable<Matrix<double>> thetas, double lambda, int numberOfTestSamples)
         {
-            var delta3 = feedForward.h - newY;
-            var r2 = (theta2.SubMatrix(0, theta2.RowCount, 1, theta2.ColumnCount - 1)).Transpose() * delta3.Transpose();
+            var m = numberOfTestSamples;
 
-            var delta2 = r2.Transpose().PointwiseMultiply(SigmoidGradient(feedForward.z2));
+            var thetasArrays = new List<double[]>();
 
-            var theta1_grad = delta2.Transpose() * feedForward.a1;
-            var theta2_grad = delta3.Transpose() * feedForward.a2;
+            var h = feedForward.OutputActivation;
+            var theta = thetas.Last();
+            var delta = h - newY;
 
-            var t1 = (lambda * theta1) / m;
-            var zerosFort1 = GetArrayOfNumber(0, t1.RowCount);
-            t1.SetColumn(0, zerosFort1);
+            var aCount = feedForward.NodesActivations.Count();
+            
+            var thetaArr = GetThetaGradient(theta, delta,
+                feedForward.NodesActivations.ElementAt(aCount - 1), lambda, m);
 
-            var t2 = (lambda * theta2) / m;
-            var zerosFort2 = GetArrayOfNumber(0, t2.RowCount);
-            t2.SetColumn(0, zerosFort2);
+            thetasArrays.Insert(0, thetaArr);
 
-            theta1_grad = (theta1_grad / m) + t1;
-            theta2_grad = (theta2_grad / m) + t2;
+            for (int i = thetas.Count() - 2, j = 0; i >= 0; i--, j++)
+            {
+                var z = feedForward.NodesOutputs.ElementAt(j);
+                var thetaWithoutFirstColumn = theta.SubMatrix(0, theta.RowCount, 1, theta.ColumnCount - 1);
+                var r = delta * thetaWithoutFirstColumn;
+                delta = r.PointwiseMultiply(SigmoidGradient(z));
 
-            var theta1_grad_arr = theta1_grad.ToColumnWiseArray();
-            var theta2_grad_arr = theta2_grad.ToColumnWiseArray();
+                var thetaArray = GetThetaGradient(thetas.ElementAt(i), delta, 
+                    feedForward.NodesActivations.ElementAt(i), lambda, m);
 
-            var grad = theta1_grad_arr.Concat(theta2_grad_arr).ToArray();
-            Matrix<double> gradMatrix = new DenseMatrix(grad.Count(), 1, grad);
+                thetasArrays.Insert(0, thetaArray);
+            }
+
+            var gradMatrix = new DenseMatrix(thetasArrays.Sum(t => t.Count()), 1, thetasArrays.SelectMany(t => t).ToArray());
 
             return gradMatrix;
+        }
+
+        private static double[] GetThetaGradient(Matrix<double> theta, 
+            Matrix<double> delta, Matrix<double> ai, double lambda, int m)
+        {
+            var thetaGradient = delta.Transpose() * ai;
+
+            var t = (lambda * theta) / m;
+            var zerosForT = GetArrayOfNumber(0, t.RowCount);
+            t.SetColumn(0, zerosForT);
+
+            thetaGradient = (thetaGradient / m) + t;
+
+            var thetaArray = thetaGradient.ToColumnWiseArray();
+            return thetaArray;
         }
 
         private static double[] GetArrayOfNumber(double number, int size)
@@ -339,11 +440,11 @@ namespace TestNeuralNetwork
         }
 
         private static double BackPropagationCostFunction(Matrix<double> h, Matrix<double> y,
-            int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix<double> theta1, Matrix<double> theta2, double lambda, int numberOfTestSamples)
+            int inputLayerSize, IEnumerable<int> hiddenLayersSizes, int numberLabels,
+            IEnumerable<Matrix<double>> thetas, double lambda, int numberOfTestSamples)
         {
             int m = numberOfTestSamples;
-         
+            
             double cost = 0;
             for (int i = 0; i < m; i++)
             {
@@ -356,48 +457,88 @@ namespace TestNeuralNetwork
             }
             double J = cost * (double)(-1 / (double)m);
 
-            double toAdd = GetRegularisationTerm(inputLayerSize, hiddenLayerSize, numberLabels,
-                theta1, theta2, lambda, m);
+            double toAdd = GetRegularisationTerm(thetas, lambda, m);
             
             J = J + toAdd;
 
             return J;
         }
 
-        private static double GetRegularisationTerm(int inputLayerSize, int hiddenLayerSize, int numberLabels,
-            Matrix<double> theta1, Matrix<double> theta2, double lambda, double numberTestSamples)
+        private static double GetRegularisationTerm(IEnumerable<Matrix<double>> thetas,
+            double lambda, double outputLayerSize)
         {
-            var m = numberTestSamples;
+            var m = outputLayerSize;
 
-            //var zeros1 = new Matrix(theta1.Rows, 1);
-            //zeros1.Zero();
-            //var zeros2 = new Matrix(theta2.Rows, 1);
-            //zeros2.Zero();
+            double thetaSum = 0;
 
-            //var thetaNew1 = Matrix.ConcatMatrices(zeros1, theta1.SubMatrix(1, theta1.Columns));
-            //var thetaNew2 = Matrix.ConcatMatrices(zeros2, theta2.SubMatrix(1, theta2.Columns));
-
-            double thetaSumA = 0;
-            for (int j = 0; j < hiddenLayerSize; j++)
+            foreach (var theta in thetas)
             {
-                for (int k = 1; k < inputLayerSize + 1; k++) // without first column - bias term!
+                for (int i = 0; i < theta.RowCount; i++)
                 {
-                    thetaSumA += Math.Pow(theta1[j, k], 2);
+                    for (int j = 1; j < theta.ColumnCount; j++) // // without first column - bias term!
+                    {
+                        thetaSum += Math.Pow(theta[i, j], 2);
+                    }
                 }
             }
 
-            double thetaSumB = 0;
-            for (int j = 0; j < numberLabels; j++)
-            {
-                for (int k = 1; k < hiddenLayerSize + 1; k++) // without first column - bias term!
-                {
-                    thetaSumB += Math.Pow(theta2[j, k], 2);
-                }
-            }
-
-            var toAdd = ((double)(lambda / ((double)(2 * m)))) * (thetaSumA + thetaSumB);
+            var toAdd = ((double)(lambda / ((double)(2 * m)))) * (thetaSum);
 
             return toAdd;
+        }
+
+        public static Tuple<double, Matrix<double>> GetPredictions(Matrix<double> X, Matrix<double> y,
+            IEnumerable<Matrix<double>> thetas)
+        {
+            var feedForward = NeuralNetwork.ForwardPropagation(X, thetas);
+            var h = feedForward.OutputActivation;
+
+            Matrix<double> predictions = new DenseMatrix(h.RowCount, 1);
+            int countMatches = 0;
+            for (int i = 0; i < h.RowCount; i++)
+            {
+                var max = h[i, 0];
+                var predictedClass = 0;
+                for (int j = 0; j < h.ColumnCount; j++)
+                {
+                    if (h[i, j] > max)
+                    {
+                        max = h[i, j];
+                        predictedClass = j + 1;
+                    }
+                }
+                if (predictedClass == y[i, 0])
+                {
+                    countMatches++;
+                }
+                predictions[i, 0] = predictedClass;
+            }
+
+            var percent = (countMatches / (double)y.RowCount) * 100;
+
+            return Tuple.Create(percent, predictions);
+        }
+
+        private static void Populate<T>(this T[] arr, T value)
+        {
+            for (int i = 0; i < arr.Length; i++)
+            {
+                arr[i] = value;
+            }
+        }
+
+        private static Matrix<double> GetOutputVectors(Matrix<double> yClasses, int numberLabels)
+        {
+            int m = yClasses.RowCount;
+
+            var y = new DenseMatrix(m, numberLabels);
+
+            for (int i = 0; i < m; i++)
+            {
+                y[i, (int)yClasses[i, 0] - 1] = 1;
+            }
+
+            return y;
         }
     }
 }
